@@ -16,7 +16,7 @@
 #   cli       CLI dashboard (requires: pip install duckdb textual)
 #   web       Start Streamlit dashboard and open in browser
 #   logs      Tail Pedro's stderr from VM
-#   destroy   Stop everything and delete all cached data
+#   down      Stop everything and delete all cached data
 
 set -euo pipefail
 
@@ -473,19 +473,19 @@ launch_vm() {
     fi
 
     # Check if something is already bound to the SSH port
-    local port_pid
-    port_pid="$(lsof -ti tcp:"${SSH_PORT}" 2>/dev/null || true)"
-    if [ -n "$port_pid" ]; then
+    local port_pids
+    port_pids="$(lsof -ti tcp:"${SSH_PORT}" 2>/dev/null || true)"
+    if [ -n "$port_pids" ]; then
         local port_info
         port_info="$(lsof -i tcp:"${SSH_PORT}" 2>/dev/null | head -5)"
         err "Port ${SSH_PORT} is already in use:"
         echo "$port_info" >&2
         echo "" >&2
-        printf '  Kill process %s and continue? [Y/n] ' "$port_pid" >&2
+        printf '  Kill process %s and continue? [Y/n] ' "$(echo $port_pids)" >&2
         read -r answer
         case "${answer:-y}" in
             [Yy]|"")
-                kill "$port_pid" 2>/dev/null || true
+                kill $port_pids 2>/dev/null || true
                 sleep 1
                 if lsof -ti tcp:"${SSH_PORT}" &>/dev/null; then
                     err "Port ${SSH_PORT} is still in use after kill. Aborting."
@@ -640,11 +640,11 @@ cmd_stop() {
     fi
 
     # Clean up any stale QEMU process still holding our SSH port
-    local stale_pid
-    stale_pid="$(lsof -ti tcp:"${SSH_PORT}" 2>/dev/null || true)"
-    if [ -n "$stale_pid" ]; then
-        log "Killing stale process on port ${SSH_PORT} (PID: ${stale_pid})..."
-        kill "$stale_pid" 2>/dev/null || true
+    local stale_pids
+    stale_pids="$(lsof -ti tcp:"${SSH_PORT}" 2>/dev/null || true)"
+    if [ -n "$stale_pids" ]; then
+        log "Killing stale process on port ${SSH_PORT} (PID: $(echo $stale_pids))..."
+        kill $stale_pids 2>/dev/null || true
     fi
 }
 
@@ -769,11 +769,22 @@ cmd_logs() {
     $SSH_CMD "sudo journalctl -u pedro-demo -u pedro-workloads -u pedro-provision -f --no-pager"
 }
 
-cmd_destroy() {
+cmd_down() {
     local had_vm=false
     if [ -f "${CACHE_DIR}/pedro-vm.qcow2" ] || is_vm_running; then
         had_vm=true
     fi
+
+    log "This will stop the VM and delete the VM disk and telemetry data."
+    printf "  Continue? [Y/n] " >&2
+    read -r answer
+    case "${answer:-y}" in
+        [Yy]|"") ;;
+        *)
+            log "Aborted."
+            return 0
+            ;;
+    esac
 
     cmd_stop
     rm -f "${CACHE_DIR}/pedro-vm.qcow2" "${CACHE_DIR}/cloud-init.iso"
@@ -781,9 +792,9 @@ cmd_destroy() {
     rm -rf "$DATA_DIR"
 
     if $had_vm; then
-        ok "VM destroyed (base image kept in ${CACHE_DIR})"
+        ok "VM removed (base image kept in ${CACHE_DIR})"
     else
-        ok "Nothing to destroy (base image kept in ${CACHE_DIR})"
+        ok "Nothing to remove (base image kept in ${CACHE_DIR})"
     fi
 }
 
@@ -802,7 +813,7 @@ cmd_help() {
     echo "  cli                  CLI dashboard (DuckDB + Textual TUI)"
     echo "  web                  Start Streamlit web dashboard"
     echo "  logs                 Tail Pedro and workload logs from VM"
-    echo "  destroy              Stop everything and delete all cached data"
+    echo "  down                 Stop everything and delete all cached data"
     echo ""
     echo "Flags:"
     echo "  --build-all   Install full dev environment (bloaty, bpftool, moroz, etc.)"
@@ -834,7 +845,7 @@ case "${1:-help}" in
     cli)     cmd_cli ;;
     web)     cmd_web ;;
     logs)    cmd_logs ;;
-    destroy) cmd_destroy ;;
+    down) cmd_down ;;
     help|-h|--help) cmd_help ;;
     *)
         err "Unknown command: $1"

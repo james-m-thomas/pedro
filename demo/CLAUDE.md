@@ -87,7 +87,7 @@ in SQL or `.rstrip("\x00")` in Python.
 After modifying `vm/user-data`, you need a fresh VM to test provisioning changes:
 
 ```bash
-./demo/demo.sh destroy   # Removes VM disk, keeps base image
+./demo/demo.sh down      # Removes VM disk, keeps base image
 ./demo/demo.sh start     # Rebuilds from scratch (~15 min)
 ```
 

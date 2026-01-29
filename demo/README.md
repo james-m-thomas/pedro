@@ -38,7 +38,7 @@ image and builds Pedro from source (cached for subsequent runs).
   cli       CLI dashboard — live exec events with color-coded DENY/ALLOW
   web       Streamlit web dashboard at http://localhost:8501
   logs      Tail Pedro and workload logs from VM journal
-  destroy   Stop everything, delete VM disk and telemetry data
+  down      Stop everything, delete VM disk and telemetry data
 ```
 
 ## What It Does
@@ -168,5 +168,5 @@ the UEFI firmware (`edk2-aarch64-code.fd`). The script looks for it in standard 
 Linux paths.
 
 **Subsequent starts are fast**: The VM disk and build artifacts are cached in `demo/.cache/`. Only
-the first run downloads the image and builds Pedro. `destroy` deletes the VM disk but keeps the
+the first run downloads the image and builds Pedro. `down` deletes the VM disk but keeps the
 base image.
