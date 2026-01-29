@@ -4,6 +4,9 @@ A turnkey environment that boots a Debian 13 QEMU VM, builds Pedro from source, 
 lockdown mode with demo workloads and live telemetry dashboards. One command to start, works on
 macOS (Apple Silicon or Intel) and Linux.
 
+<img width="1881" height="1108" alt="CleanShot 2026-01-28 at 23 49 18" src="https://github.com/user-attachments/assets/821859cd-121c-4320-9142-edbb7f5458f5" />
+
+
 ## Quick Start
 
 ```bash
@@ -110,6 +113,8 @@ Parquet files use the [Santa-compatible schema](../vendor/rednose/) with these k
 
 ### CLI Dashboard (`cli`)
 
+<img width="988" height="850" alt="CleanShot 2026-01-28 at 23 40 43" src="https://github.com/user-attachments/assets/848d9f52-e30f-412c-aa61-ff6457267100" />
+
 Uses DuckDB to query Parquet files and Textual for a full-screen TUI:
 - Auto-refreshes every 2 seconds
 - Color-coded: red for DENY, green for ALLOW, magenta for LOCKDOWN mode
@@ -118,7 +123,11 @@ Uses DuckDB to query Parquet files and Textual for a full-screen TUI:
 
 Requires `pip install duckdb textual` (auto-installed on first run).
 
+
 ### Web Dashboard (`web`)
+
+<img width="2154" height="1352" alt="CleanShot 2026-01-28 at 23 47 43" src="https://github.com/user-attachments/assets/870f7304-7482-44a7-b110-dbe01b6b908d" />
+
 
 Streamlit app running in Docker with four tabs:
 - **Live Feed**: Most recent 200 exec events, denied rows highlighted red
@@ -127,6 +136,9 @@ Streamlit app running in Docker with four tabs:
 - **Test Binaries**: Run predefined blocked binaries or upload custom binaries to test
 
 Auto-refreshes every 3 seconds. Runs at http://localhost:8501.
+
+
+
 
 ## File Layout
 
@@ -166,7 +178,3 @@ demo/.data/telemetry/`.
 **VM not booting (aarch64)**: Ensure QEMU was installed with `brew install qemu` which includes
 the UEFI firmware (`edk2-aarch64-code.fd`). The script looks for it in standard Homebrew and
 Linux paths.
-
-**Subsequent starts are fast**: The VM disk and build artifacts are cached in `demo/.cache/`. Only
-the first run downloads the image and builds Pedro. `down` deletes the VM disk but keeps the
-base image.
