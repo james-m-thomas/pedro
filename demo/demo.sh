@@ -119,8 +119,15 @@ _stream_log_until() {
     local fetcher_pid=""
 
     if [ "$source" = "ssh" ]; then
-        # Stream provisioning-related logs from VM (sudo for system journal access)
-        $SSH_CMD "sudo journalctl -f --no-pager -o cat -u pedro-provision -u pedro-demo -u pedro-workloads -u cloud-init 2>/dev/null" >> "$logfile" 2>/dev/null &
+        # Stream provisioning-related logs from VM (sudo for system journal access).
+        # Wrapped in a reconnect loop so that VM reboots (e.g. after first-boot)
+        # don't permanently kill the log stream.
+        (
+            while true; do
+                $SSH_CMD "sudo journalctl -f --no-pager -o cat -u pedro-provision -u pedro-demo -u pedro-workloads -u cloud-init 2>/dev/null" >> "$logfile" 2>/dev/null || true
+                sleep 5
+            done
+        ) &
         fetcher_pid=$!
     else
         tail -f "${CACHE_DIR}/serial.log" 2>/dev/null >> "$logfile" &
@@ -765,12 +772,21 @@ cmd_logs() {
 }
 
 cmd_destroy() {
+    local had_vm=false
+    if [ -f "${CACHE_DIR}/pedro-vm.qcow2" ] || is_vm_running; then
+        had_vm=true
+    fi
+
     cmd_stop
-    log "Removing VM disk and data..."
     rm -f "${CACHE_DIR}/pedro-vm.qcow2" "${CACHE_DIR}/cloud-init.iso"
     rm -f "${CACHE_DIR}/serial.log" "${CACHE_DIR}/qemu.pid" "${CACHE_DIR}/live.log"
     rm -rf "$DATA_DIR"
-    ok "VM destroyed (base image kept in ${CACHE_DIR})"
+
+    if $had_vm; then
+        ok "VM destroyed (base image kept in ${CACHE_DIR})"
+    else
+        ok "Nothing to destroy (base image kept in ${CACHE_DIR})"
+    fi
 }
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
