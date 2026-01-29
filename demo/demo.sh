@@ -467,6 +467,34 @@ launch_vm() {
         fi
     fi
 
+    # Check if something is already bound to the SSH port
+    local port_pid
+    port_pid="$(lsof -ti tcp:"${SSH_PORT}" 2>/dev/null || true)"
+    if [ -n "$port_pid" ]; then
+        local port_info
+        port_info="$(lsof -i tcp:"${SSH_PORT}" 2>/dev/null | head -5)"
+        err "Port ${SSH_PORT} is already in use:"
+        echo "$port_info" >&2
+        echo "" >&2
+        printf '  Kill process %s and continue? [Y/n] ' "$port_pid" >&2
+        read -r answer
+        case "${answer:-y}" in
+            [Yy]|"")
+                kill "$port_pid" 2>/dev/null || true
+                sleep 1
+                if lsof -ti tcp:"${SSH_PORT}" &>/dev/null; then
+                    err "Port ${SSH_PORT} is still in use after kill. Aborting."
+                    exit 1
+                fi
+                ok "Port ${SSH_PORT} is now free"
+                ;;
+            *)
+                err "Cannot launch VM without port ${SSH_PORT}. Aborting."
+                exit 1
+                ;;
+        esac
+    fi
+
     log "Launching QEMU VM..."
     "$qemu" "${qemu_args[@]}"
     ok "VM started (PID: $(cat "$QEMU_PID_FILE"))"
@@ -597,11 +625,21 @@ cmd_stop() {
         # Force kill if still running
         if is_vm_running; then
             kill "$(cat "$QEMU_PID_FILE")" 2>/dev/null || true
+            sleep 1
         fi
         rm -f "$QEMU_PID_FILE"
         ok "VM stopped"
     else
         log "VM is not running"
+        rm -f "$QEMU_PID_FILE"
+    fi
+
+    # Clean up any stale QEMU process still holding our SSH port
+    local stale_pid
+    stale_pid="$(lsof -ti tcp:"${SSH_PORT}" 2>/dev/null || true)"
+    if [ -n "$stale_pid" ]; then
+        log "Killing stale process on port ${SSH_PORT} (PID: ${stale_pid})..."
+        kill "$stale_pid" 2>/dev/null || true
     fi
 }
 
