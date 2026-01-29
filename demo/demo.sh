@@ -232,16 +232,17 @@ wait_for_ssh() {
 # ─── Prerequisites ─────────────────────────────────────────────────────────────
 
 check_prerequisites() {
-    local missing_brew=()  # packages installable via brew
+    local missing_pkg=()   # packages installable via package manager
     local missing_other=() # packages requiring manual install
+    local os="$(detect_os)"
     local qemu="$(qemu_binary)"
 
     if ! command -v "$qemu" &>/dev/null; then
-        missing_brew+=("qemu")
+        missing_pkg+=("qemu")
     fi
 
     if ! command -v mkisofs &>/dev/null && ! command -v genisoimage &>/dev/null; then
-        missing_brew+=("cdrtools")
+        missing_pkg+=("cdrtools")
     fi
 
     if [ "${1:-}" = "--with-docker" ]; then
@@ -250,7 +251,7 @@ check_prerequisites() {
         fi
     fi
 
-    if [ ${#missing_brew[@]} -eq 0 ] && [ ${#missing_other[@]} -eq 0 ]; then
+    if [ ${#missing_pkg[@]} -eq 0 ] && [ ${#missing_other[@]} -eq 0 ]; then
         return 0
     fi
 
@@ -262,34 +263,84 @@ check_prerequisites() {
         done
     fi
 
-    # Offer to brew install what we can
-    if [ ${#missing_brew[@]} -gt 0 ]; then
-        if ! command -v brew &>/dev/null; then
-            err "Missing packages: ${missing_brew[*]}"
-            err "Homebrew is not installed. Install from https://brew.sh and rerun."
-            exit 1
+    # Offer to install what we can
+    if [ ${#missing_pkg[@]} -gt 0 ]; then
+        if [ "$os" = "linux" ]; then
+            _install_prerequisites_apt "${missing_pkg[@]}"
+        else
+            _install_prerequisites_brew "${missing_pkg[@]}"
         fi
-
-        log "Missing packages: ${missing_brew[*]}"
-        printf "  Install via Homebrew? [Y/n] "
-        read -r answer
-        case "${answer:-y}" in
-            [Yy]|"")
-                log "Running: brew install ${missing_brew[*]}"
-                brew install "${missing_brew[@]}"
-                ok "Dependencies installed"
-                ;;
-            *)
-                err "Cannot continue without: ${missing_brew[*]}"
-                exit 1
-                ;;
-        esac
     fi
 
     if [ ${#missing_other[@]} -gt 0 ]; then
         err "Please install the packages above and rerun."
         exit 1
     fi
+}
+
+# Map generic package names to apt packages and install them.
+_install_prerequisites_apt() {
+    local apt_pkgs=()
+    local arch="$(detect_arch)"
+    for pkg in "$@"; do
+        case "$pkg" in
+            qemu)
+                if [ "$arch" = "arm64" ]; then
+                    apt_pkgs+=("qemu-system-arm")
+                else
+                    apt_pkgs+=("qemu-system-x86")
+                fi
+                ;;
+            cdrtools) apt_pkgs+=("genisoimage") ;;
+            *) apt_pkgs+=("$pkg") ;;
+        esac
+    done
+
+    if ! command -v apt-get &>/dev/null; then
+        err "Missing packages: ${apt_pkgs[*]}"
+        err "apt-get not found. Please install manually and rerun."
+        exit 1
+    fi
+
+    log "Missing packages: ${apt_pkgs[*]}"
+    printf "  Install via apt? [Y/n] "
+    read -r answer
+    case "${answer:-y}" in
+        [Yy]|"")
+            log "Running: sudo apt-get install -y ${apt_pkgs[*]}"
+            sudo apt-get update -qq
+            sudo apt-get install -y "${apt_pkgs[@]}"
+            ok "Dependencies installed"
+            ;;
+        *)
+            err "Cannot continue without: ${apt_pkgs[*]}"
+            exit 1
+            ;;
+    esac
+}
+
+_install_prerequisites_brew() {
+    local missing_brew=("$@")
+    if ! command -v brew &>/dev/null; then
+        err "Missing packages: ${missing_brew[*]}"
+        err "Homebrew is not installed. Install from https://brew.sh and rerun."
+        exit 1
+    fi
+
+    log "Missing packages: ${missing_brew[*]}"
+    printf "  Install via Homebrew? [Y/n] "
+    read -r answer
+    case "${answer:-y}" in
+        [Yy]|"")
+            log "Running: brew install ${missing_brew[*]}"
+            brew install "${missing_brew[@]}"
+            ok "Dependencies installed"
+            ;;
+        *)
+            err "Cannot continue without: ${missing_brew[*]}"
+            exit 1
+            ;;
+    esac
 }
 
 # ─── Cloud Image ───────────────────────────────────────────────────────────────
@@ -758,6 +809,9 @@ cmd_web() {
     if command -v open &>/dev/null; then
         sleep 2
         open "http://localhost:8501"
+    elif command -v xdg-open &>/dev/null; then
+        sleep 2
+        xdg-open "http://localhost:8501"
     fi
 }
 
@@ -820,8 +874,12 @@ cmd_help() {
     echo "                Default: build deps only (~5-10 min vs ~20 min)"
     echo ""
     echo "Prerequisites:"
-    echo "  brew install qemu cdrtools"
-    echo "  # For web dashboard: Docker Desktop"
+    if [ "$(detect_os)" = "linux" ]; then
+        echo "  sudo apt-get install qemu-system-x86 genisoimage"
+    else
+        echo "  brew install qemu cdrtools"
+    fi
+    echo "  # For web dashboard: Docker"
     echo ""
     echo "First run takes ~5-10 min (downloading image + building Pedro)."
     echo "Subsequent runs reuse the cached VM disk."
