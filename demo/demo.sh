@@ -383,15 +383,13 @@ create_cloud_init_iso() {
 
     # Determine setup.sh flags
     local setup_flags=""
-    local sccache_prebuilt="SCCACHE_PREBUILT=1"
     if [ -n "$DEMO_BUILD_ALL" ]; then
         setup_flags="--all"
-        sccache_prebuilt=""
     fi
 
     # Use awk instead of sed — SSH keys contain characters that break sed
-    awk -v key="$ssh_key" -v flags="$setup_flags" -v sccache="$sccache_prebuilt" \
-        '{gsub(/SSH_PUB_KEY_PLACEHOLDER/, key); gsub(/SETUP_FLAGS_PLACEHOLDER/, flags); gsub(/SCCACHE_PREBUILT_PLACEHOLDER/, sccache); print}' \
+    awk -v key="$ssh_key" -v flags="$setup_flags" \
+        '{gsub(/SSH_PUB_KEY_PLACEHOLDER/, key); gsub(/SETUP_FLAGS_PLACEHOLDER/, flags); print}' \
         "${VM_DIR}/user-data" > "${tmpdir}/user-data"
     cp "${VM_DIR}/meta-data" "${tmpdir}/meta-data"
 
@@ -544,7 +542,7 @@ cmd_start() {
         echo ""
         if ! $SSH_CMD "systemctl is-active pedro-demo --quiet" 2>/dev/null; then
             log "Provisioning still in progress — streaming logs..."
-            if ! _stream_log_until "ssh" 10 1800 '$SSH_CMD "test -f /var/lib/pedro-provisioned"'; then
+            if ! _stream_log_until "ssh" 10 1800 '$SSH_CMD "test -f /var/lib/pedro-provisioned && systemctl is-active pedro-demo --quiet"'; then
                 err "Provisioning timed out. Check: $0 logs"
                 exit 1
             fi
@@ -594,7 +592,7 @@ cmd_start() {
     # Wait for provisioning to complete (streams journalctl from VM)
     log "Waiting for provisioning to complete..."
     log "(First run takes ${time_est}: installing packages, building Pedro)"
-    if ! _stream_log_until "ssh" 10 1800 '$SSH_CMD "test -f /var/lib/pedro-provisioned"'; then
+    if ! _stream_log_until "ssh" 10 1800 '$SSH_CMD "test -f /var/lib/pedro-provisioned && systemctl is-active pedro-demo --quiet"'; then
         err "Provisioning timed out. Check: $0 logs"
         exit 1
     fi

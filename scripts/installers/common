@@ -120,18 +120,7 @@ function check_sccache() {
 }
 
 function install_sccache() {
-    if [[ -n "${SCCACHE_PREBUILT:-}" ]]; then
-        local version="0.10.0"
-        local arch="$(uname -m)"  # x86_64 or aarch64
-        local tarball="sccache-v${version}-${arch}-unknown-linux-musl.tar.gz"
-        local url="https://github.com/mozilla/sccache/releases/download/v${version}/${tarball}"
-        wget -q "$url" || return "$?"
-        tar xzf "$tarball" || return "$?"
-        sudo cp "sccache-v${version}-${arch}-unknown-linux-musl/sccache" "${LOCAL_BIN}/sccache"
-        sudo chmod +x "${LOCAL_BIN}/sccache"
-    else
-        cargo install sccache --locked || return "$?"
-    fi
+    cargo install sccache --locked
 }
 
 function log() {
