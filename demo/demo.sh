@@ -471,9 +471,28 @@ launch_vm() {
 
     local serial_log="${CACHE_DIR}/serial.log"
 
+    # Give the VM half the host's cores and memory, with sensible bounds.
+    local host_cores
+    local host_mem_gb
+    if [ "$os" = "macos" ]; then
+        host_cores="$(sysctl -n hw.ncpu)"
+        host_mem_gb="$(( $(sysctl -n hw.memsize) / 1073741824 ))"
+    else
+        host_cores="$(nproc)"
+        host_mem_gb="$(awk '/MemTotal/ {printf "%d", $2/1048576}' /proc/meminfo)"
+    fi
+    local vm_cores=$(( host_cores / 2 ))
+    local vm_mem=$(( host_mem_gb / 2 ))
+    # Clamp to reasonable range
+    [ "$vm_cores" -lt 2 ] && vm_cores=2
+    [ "$vm_cores" -gt 64 ] && vm_cores=64
+    [ "$vm_mem" -lt 4 ] && vm_mem=4
+    [ "$vm_mem" -gt 64 ] && vm_mem=64
+    log "VM resources: ${vm_cores} cores, ${vm_mem}G RAM (host: ${host_cores} cores, ${host_mem_gb}G RAM)"
+
     local qemu_args=(
-        -m 8G
-        -smp 4
+        -m "${vm_mem}G"
+        -smp "$vm_cores"
         -drive "file=${disk},if=virtio,format=qcow2"
         -drive "file=${iso},format=raw,if=virtio"
         -device virtio-net-pci,netdev=net0
