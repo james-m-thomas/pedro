@@ -1,0 +1,6 @@
+streamlit>=1.41
+duckdb>=1.2
+pyarrow>=18
+pandas>=2
+rich>=13
+textual>=0.80

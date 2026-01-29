@@ -1,0 +1,213 @@
+#cloud-config
+
+users:
+  - name: pedro
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - SSH_PUB_KEY_PLACEHOLDER
+
+runcmd:
+  - mkdir -p /opt/pedro /opt/pedro-data
+  - touch /var/lib/pedro-needs-setup
+  - systemctl daemon-reload
+  - systemctl enable pedro-provision pedro-demo pedro-workloads
+  - systemctl start pedro-provision
+
+write_files:
+  - path: /opt/pedro-firstboot.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -eux
+      export TERM=xterm
+      # Wrap tput to never fail (rednose uses tput with set -e, which is fatal without a TTY)
+      tput() { command tput "$@" 2>/dev/null || true; }; export -f tput
+      exec > >(tee -a /var/log/pedro-provision.log) 2>&1
+      echo "=== Pedro first-boot provisioning $(date) ==="
+      [ -f /var/lib/pedro-needs-setup ] || exit 0
+
+      apt-get update && apt-get install -y rsync
+
+      # Clone the repo
+      if [ ! -f /opt/pedro/scripts/setup.sh ]; then
+        apt-get install -y git
+        git clone --recurse-submodules https://github.com/wowsignal-io/pedro.git /opt/pedro-local
+        rmdir /opt/pedro 2>/dev/null || true
+        ln -sfn /opt/pedro-local /opt/pedro
+      fi
+
+      # Pre-add cargo to PATH so sccache install finds it after rustup.
+      # HOME may not be set under systemd; firstboot runs as root.
+      export HOME="${HOME:-/root}"
+      export PATH="$HOME/.cargo/bin:$PATH"
+
+      cd /opt/pedro
+      ./scripts/setup.sh SETUP_FLAGS_PLACEHOLDER
+
+      # setup.sh creates symlinks to ~/go/bin/ which is /root/go/bin/,
+      # inaccessible to user pedro. Replace symlinks with actual copies.
+      # Not all binaries are installed in every mode (e.g. buildifier/moroz
+      # are test-only), so only process files that exist as symlinks.
+      for f in /usr/local/bin/bazel /usr/local/bin/buildifier /usr/local/bin/moroz; do
+        if [ -L "$f" ]; then
+          target=$(readlink -f "$f" 2>/dev/null) || continue
+          [ -f "$target" ] && cp "$target" "$f.tmp" && mv "$f.tmp" "$f"
+        fi
+      done
+
+      rm -f /var/lib/pedro-needs-setup
+      touch /var/lib/pedro-needs-secondboot
+      echo "=== First-boot done. Rebooting for GRUB changes ==="
+      reboot
+
+  - path: /opt/pedro-secondboot.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -eux
+      export TERM=xterm
+      tput() { command tput "$@" 2>/dev/null || true; }; export -f tput
+      exec > >(tee -a /var/log/pedro-provision.log) 2>&1
+      echo "=== Pedro second-boot provisioning $(date) ==="
+      [ -f /var/lib/pedro-needs-secondboot ] || exit 0
+
+      BUILD_DIR="/opt/pedro"
+
+      # Source is owned by root from the clone — copy to a writable build dir
+      if ! su pedro -c "test -w /opt/pedro"; then
+        cp -a /opt/pedro/. /home/pedro/pedro-build/
+        chown -R pedro:pedro /home/pedro/pedro-build
+        BUILD_DIR="/home/pedro/pedro-build"
+      fi
+
+      echo "=== Building Pedro ==="
+      su - pedro -c "cd ${BUILD_DIR} && ./scripts/build.sh -c Release"
+
+      mkdir -p /opt/pedro-data/telemetry/spool
+      chown -R pedro:pedro /opt/pedro-data
+
+      BLOCKED_HASH=$(sha256sum /usr/bin/lsmod | awk '{print $1}')
+      echo "Blocking /usr/bin/lsmod hash: ${BLOCKED_HASH}"
+
+      # Write start script with resolved paths
+      cat > /opt/pedro-start.sh <<EOF
+      #!/bin/bash
+      set -eux
+      exec ${BUILD_DIR}/bazel-bin/bin/pedro \
+        --pedrito_path=${BUILD_DIR}/bazel-bin/bin/pedrito \
+        --uid=\$(id -u pedro) \
+        --blocked_hashes=${BLOCKED_HASH} \
+        --lockdown=true \
+        --pid_file=/var/run/pedro.pid \
+        --ctl_socket_path=/var/run/pedro.ctl.sock \
+        --admin_socket_path=/var/run/pedro.admin.sock \
+        -- \
+        --output_stderr \
+        --output_parquet \
+        --output_parquet_path=/opt/pedro-data/telemetry
+      EOF
+      chmod 755 /opt/pedro-start.sh
+
+      # Fix indentation from cloud-init (strip leading whitespace)
+      sed -i 's/^      //' /opt/pedro-start.sh
+
+      rm -f /var/lib/pedro-needs-secondboot
+      touch /var/lib/pedro-provisioned
+      echo "=== Provisioning complete ==="
+      systemctl start pedro-demo
+      systemctl start pedro-workloads
+
+  - path: /etc/systemd/system/pedro-provision.service
+    content: |
+      [Unit]
+      Description=Pedro Demo Provisioning
+      After=network-online.target cloud-init.service
+      Wants=network-online.target
+      ConditionPathExists=!/var/lib/pedro-provisioned
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/bin/bash -c 'if [ -f /var/lib/pedro-needs-setup ]; then /opt/pedro-firstboot.sh; elif [ -f /var/lib/pedro-needs-secondboot ]; then /opt/pedro-secondboot.sh; fi'
+      StandardOutput=journal+console
+      StandardError=journal+console
+      TimeoutStartSec=3600
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/pedro-demo.service
+    content: |
+      [Unit]
+      Description=Pedro EDR Demo
+      After=pedro-provision.service
+      ConditionPathExists=/var/lib/pedro-provisioned
+
+      [Service]
+      Type=exec
+      ExecStart=/opt/pedro-start.sh
+      Restart=on-failure
+      RestartSec=5
+      StandardOutput=journal+console
+      StandardError=journal+console
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/pedro-workloads.service
+    content: |
+      [Unit]
+      Description=Pedro Demo Workloads
+      After=pedro-demo.service
+      Requires=pedro-demo.service
+
+      [Service]
+      Type=simple
+      User=pedro
+      ExecStart=/opt/pedro-workloads.sh
+      Restart=on-failure
+      RestartSec=10
+      StandardOutput=journal+console
+      StandardError=journal+console
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /opt/pedro-workloads.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Demo workload generator for Pedro.
+      echo "=== Pedro demo workloads starting ==="
+
+      ITER=0
+      while true; do
+        ITER=$((ITER + 1))
+
+        # Benign telemetry (every cycle)
+        date +"%Y-%m-%d %H:%M:%S" > /dev/null
+        uname -a > /dev/null
+        id > /dev/null
+        ls /tmp > /dev/null
+        cat /etc/hostname > /dev/null
+        ps --no-headers -eo pid,comm | head -5 > /dev/null
+        whoami > /dev/null
+        hostname > /dev/null
+
+        # More varied commands every other cycle
+        if [ $((ITER % 2)) -eq 0 ]; then
+          find /usr/bin -maxdepth 1 -type f 2>/dev/null | head -3 | xargs -I{} stat {} > /dev/null 2>&1
+          env > /dev/null
+          df -h > /dev/null 2>&1
+        fi
+
+        # Blocked binary (every ~10s)
+        if [ $((ITER % 2)) -eq 0 ]; then
+          echo "[workload] Attempting blocked binary /usr/bin/lsmod..."
+          /usr/bin/lsmod > /dev/null 2>&1; rc=$?
+          echo "[workload] lsmod exit code: $rc (137 = killed)"
+        fi
+
+        sleep 5
+      done
