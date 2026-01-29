@@ -43,7 +43,7 @@ write_files:
       export PATH="$HOME/.cargo/bin:$PATH"
 
       cd /opt/pedro
-      ./scripts/setup.sh SETUP_FLAGS_PLACEHOLDER
+      SCCACHE_PREBUILT_PLACEHOLDER ./scripts/setup.sh SETUP_FLAGS_PLACEHOLDER
 
       # setup.sh creates symlinks to ~/go/bin/ which is /root/go/bin/,
       # inaccessible to user pedro. Replace symlinks with actual copies.

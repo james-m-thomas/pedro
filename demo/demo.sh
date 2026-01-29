@@ -376,13 +376,15 @@ create_cloud_init_iso() {
 
     # Determine setup.sh flags
     local setup_flags=""
+    local sccache_prebuilt="SCCACHE_PREBUILT=1"
     if [ -n "$DEMO_BUILD_ALL" ]; then
         setup_flags="--all"
+        sccache_prebuilt=""
     fi
 
     # Use awk instead of sed — SSH keys contain characters that break sed
-    awk -v key="$ssh_key" -v flags="$setup_flags" \
-        '{gsub(/SSH_PUB_KEY_PLACEHOLDER/, key); gsub(/SETUP_FLAGS_PLACEHOLDER/, flags); print}' \
+    awk -v key="$ssh_key" -v flags="$setup_flags" -v sccache="$sccache_prebuilt" \
+        '{gsub(/SSH_PUB_KEY_PLACEHOLDER/, key); gsub(/SETUP_FLAGS_PLACEHOLDER/, flags); gsub(/SCCACHE_PREBUILT_PLACEHOLDER/, sccache); print}' \
         "${VM_DIR}/user-data" > "${tmpdir}/user-data"
     cp "${VM_DIR}/meta-data" "${tmpdir}/meta-data"
 
